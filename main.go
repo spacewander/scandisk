@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 )
 
 const (
@@ -16,8 +18,20 @@ const (
 )
 
 var (
+	root           string
+	output         string
+	outputFilename string
+
 	BlockSize int64
 )
+
+func init() {
+	flag.StringVar(&root, "root", "/", "Set the directory to scan from")
+	flag.StringVar(&output, "output", "html",
+		"Set the output destination(html or text). It will output to '$filename.html' by default.")
+	flag.StringVar(&outputFilename, "filename", "output",
+		"If the output is set to html, this argument decides the output file name.")
+}
 
 type Node struct {
 	size     int64
@@ -64,6 +78,11 @@ func (n *Node) String() string {
 	return fmt.Sprintf("%-10s %s", int64ToSizeStr(n.size), n.name)
 }
 
+func printErrorThenExit(fmtStr string, err error) {
+	fmt.Fprintf(os.Stderr, fmtStr+"\n", err)
+	os.Exit(1)
+}
+
 func travelDir(root *Node, dir string) {
 	files, err := filepath.Glob(filepath.Join(dir, "*"))
 	if err != nil {
@@ -105,18 +124,64 @@ func displayAsText(root *Node) {
 	printNode(root, 0)
 }
 
+type NodeJsonDump struct {
+	Children []NodeJsonDump `json:"children"`
+	Text     string         `json:"text"`
+}
+
+func dumpNodeToJson(node *Node) NodeJsonDump {
+	dump := NodeJsonDump{}
+	dump.Text = node.String()
+	for _, child := range node.children {
+		dump.Children = append(dump.Children, dumpNodeToJson(&child))
+	}
+	return dump
+}
+
+func displayAsHtml(root *Node) {
+	jsonData := dumpNodeToJson(root)
+	result, err := json.Marshal(jsonData)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dump json data failed: %v", err)
+	} else {
+		tmpl, err := template.ParseFiles("scandisk.tmpl")
+		if err != nil {
+			printErrorThenExit("parse template failed: %v", err)
+		}
+		if !strings.HasSuffix(outputFilename, ".html") {
+			outputFilename += ".html"
+		}
+		file, err := os.OpenFile(outputFilename,
+			os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			printErrorThenExit("open "+outputFilename+" failed: %v", err)
+		}
+		defer file.Close()
+		err = tmpl.Execute(file, struct {
+			Data string
+		}{
+			string(result),
+		})
+		if err != nil {
+			printErrorThenExit("render template failed: %v", err)
+		}
+	}
+}
+
 func main() {
-	var root string
-	flag.StringVar(&root, "root", "/", "Set the directory to scan from")
 	flag.Parse()
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "The root %s should be a directory\n", root)
-		os.Exit(1)
+		printErrorThenExit("The root argument should be a directory", nil)
 	}
 	BlockSize = statfs(root)
 	rootNode := Node{
 		name: root,
 	}
 	travelDir(&rootNode, root)
-	displayAsText(&rootNode)
+	switch output {
+	case "text":
+		displayAsText(&rootNode)
+	default:
+		displayAsHtml(&rootNode)
+	}
 }
