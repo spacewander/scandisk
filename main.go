@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,20 +19,15 @@ const (
 )
 
 var (
-	root           string
+	OS string = runtime.GOOS
+
+	// arguments
+	rootDir        string
 	output         string
 	outputFilename string
 
 	BlockSize int64
 )
-
-func init() {
-	flag.StringVar(&root, "root", "/", "Set the directory to scan from")
-	flag.StringVar(&output, "output", "html",
-		"Set the output destination(html or text). It will output to '$filename.html' by default.")
-	flag.StringVar(&outputFilename, "filename", "output",
-		"If the output is set to html, this argument decides the output file name.")
-}
 
 type Node struct {
 	size     int64
@@ -79,11 +75,21 @@ func (n *Node) String() string {
 }
 
 func printErrorThenExit(fmtStr string, err error) {
-	fmt.Fprintf(os.Stderr, fmtStr+"\n", err)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, fmtStr+"\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, fmtStr+"\n")
+	}
 	os.Exit(1)
 }
 
-func travelDir(root *Node, dir string) {
+func travelDir(root *Node, dir string, depth int) {
+	if OS == "linux" && depth < 2 {
+		if strings.HasPrefix(dir, "/proc") {
+			return
+		}
+		depth += 1
+	}
 	files, err := filepath.Glob(filepath.Join(dir, "*"))
 	if err != nil {
 		return
@@ -96,7 +102,7 @@ func travelDir(root *Node, dir string) {
 		if info, err := os.Lstat(file); err == nil {
 			if info.IsDir() {
 				fileNode.name += PathSeparator
-				travelDir(&fileNode, file)
+				travelDir(&fileNode, file, depth)
 			} else {
 				// file system stores data in blocks, so the disk occupation
 				// should be the multiplier of block size.
@@ -113,10 +119,10 @@ func travelDir(root *Node, dir string) {
 	})
 }
 
-func printNode(node *Node, level int) {
-	fmt.Println(strings.Repeat("  ", level) + node.String())
+func printNode(node *Node, depth int) {
+	fmt.Println(strings.Repeat("  ", depth) + node.String())
 	for _, node := range node.children {
-		printNode(&node, level+1)
+		printNode(&node, depth+1)
 	}
 }
 
@@ -169,15 +175,20 @@ func displayAsHtml(root *Node) {
 }
 
 func main() {
+	flag.StringVar(&rootDir, "root", "/", "Set the directory to scan from")
+	flag.StringVar(&output, "output", "html",
+		"Set the output destination(html or text). It will output to '$filename.html' by default.")
+	flag.StringVar(&outputFilename, "filename", "output",
+		"If the output is set to html, this argument decides the output file name.")
 	flag.Parse()
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+	if info, err := os.Stat(rootDir); err != nil || !info.IsDir() {
 		printErrorThenExit("The root argument should be a directory", nil)
 	}
-	BlockSize = statfs(root)
+	BlockSize = statfs(rootDir)
 	rootNode := Node{
-		name: root,
+		name: rootDir,
 	}
-	travelDir(&rootNode, root)
+	travelDir(&rootNode, rootDir, 0)
 	switch output {
 	case "text":
 		displayAsText(&rootNode)
