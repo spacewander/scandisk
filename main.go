@@ -79,11 +79,18 @@ func (n *Node) String() string {
 }
 
 func printErrorThenExit(fmtStr string, err error) {
-	fmt.Fprintf(os.Stderr, fmtStr+"\n", err)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, fmtStr+"\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, fmtStr+"\n")
+	}
 	os.Exit(1)
 }
 
 func travelDir(root *Node, dir string) {
+	if strings.HasPrefix(dir, "/proc") {
+		return
+	}
 	files, err := filepath.Glob(filepath.Join(dir, "*"))
 	if err != nil {
 		return
