@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"path/filepath"
@@ -144,13 +145,30 @@ func dumpNodeToJson(node *Node) NodeJsonDump {
 	return dump
 }
 
+func releaseStaticAssets(assets []string) error {
+	for _, fn := range assets {
+		data, err := Asset("assets/" + fn)
+		if err != nil {
+			return err
+		}
+		if err = ioutil.WriteFile(fn, data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func displayAsHtml(root *Node) {
 	jsonData := dumpNodeToJson(root)
 	result, err := json.Marshal(jsonData)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dump json data failed: %v", err)
 	} else {
-		tmpl, err := template.ParseFiles("scandisk.tmpl")
+		tmplData, err := Asset("assets/scandisk.tmpl")
+		if err != nil {
+			printErrorThenExit("template file not found: %v", err)
+		}
+		tmpl, err := template.New("scandisk").Parse(string(tmplData))
 		if err != nil {
 			printErrorThenExit("parse template failed: %v", err)
 		}
@@ -170,6 +188,14 @@ func displayAsHtml(root *Node) {
 		})
 		if err != nil {
 			printErrorThenExit("render template failed: %v", err)
+		}
+
+		err = releaseStaticAssets([]string{
+			"jquery.1.12.1.min.js", "jstree.min.js", "style.min.css",
+			"throbber.gif", "32px.png", "40px.png",
+		})
+		if err != nil {
+			printErrorThenExit("release static assets failed: %v", err)
 		}
 	}
 }

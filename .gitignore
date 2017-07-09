@@ -1,2 +1,6 @@
 scandisk
 output.html
+*.gif
+*.png
+*.js
+*.css
